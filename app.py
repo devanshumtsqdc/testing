@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
+import os
 
 app = FastAPI(
     title="LLM Memory Requirements API",
@@ -107,6 +108,7 @@ async def calculate_training(data: TrainingMemoryRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+if __name__ == '__main__':
 
-if __name__ == "__main__":
-    uvicorn.run("app:app", host="0.0.0.0", port=8001, log_level="info")
+    port = int(os.environ.get('PORT', 4000))  # Use PORT from the environment or default to 4000
+    app.run(host='0.0.0.0', port=port)
