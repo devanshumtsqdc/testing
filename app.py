@@ -106,3 +106,7 @@ async def calculate_training(data: TrainingMemoryRequest):
         return calculate_training_memory(data)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+if __name__ == "__main__":
+    uvicorn.run("app:app", host="0.0.0.0", port=8001, log_level="info")
