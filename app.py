@@ -1,116 +1,98 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, HTTPException, UploadFile, Form
 from pydantic import BaseModel
+import json
 from typing import Optional
-import os
-import uvicorn
+from config import DATA_TYPES, PARAMETERS, OPTIMIZERS
+from utils import calculate_inference_memory, calculate_training_memory
 
-app = FastAPI(
-    title="LLM Memory Requirements API",
-    description="API to calculate memory requirements for large language models during inference and training.",
-    version="1.0.0",
-)
+# Initialize FastAPI app
+app = FastAPI(title="LLM Memory Requirements API")
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Adjust origins as needed for security
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Schemas and helper functions remain the same
-class InferenceMemoryRequest(BaseModel):
-    model_size: float
-    precision: str
+# ----------------- Request Models ----------------- #
+class InferenceRequest(BaseModel):
+    model_size: float  # in billions
+    precision: str  # data type
     batch_size: int
     sequence_length: int
     hidden_size: int
     num_hidden_layers: int
     num_attention_heads: int
 
-
-class InferenceMemoryResponse(BaseModel):
-    inference_memory: float
-    model_weights: float
-    kv_cache: float
-    activation_memory: float
-
-
-class TrainingMemoryRequest(BaseModel):
-    model_size: float
-    precision: str
-    batch_size: int
-    sequence_length: int
-    hidden_size: int
-    num_hidden_layers: int
-    num_attention_heads: int
+class TrainingRequest(InferenceRequest):
     optimizer: str
-    trainable_parameters: int
+    trainable_parameters: int  # percentage
 
+# ----------------- Endpoints ----------------- #
+@app.get("/")
+def read_root():
+    return {"message": "Welcome to the LLM Memory Requirements API"}
 
-class TrainingMemoryResponse(BaseModel):
-    training_memory: float
-    model_weights: float
-    kv_cache: float
-    activation_memory: float
-    optimizer_memory: float
-    gradients_memory: float
-
-
-class Error(BaseModel):
-    code: int
-    message: str
-
-
-def calculate_inference_memory(data: InferenceMemoryRequest) -> InferenceMemoryResponse:
-    model_weights = data.model_size * 1024
-    kv_cache = data.sequence_length * data.hidden_size * data.num_attention_heads * 2 / 1e6
-    activation_memory = data.batch_size * data.sequence_length * data.hidden_size / 1e6
-    total_memory = model_weights + kv_cache + activation_memory
-    return InferenceMemoryResponse(
-        inference_memory=total_memory,
-        model_weights=model_weights,
-        kv_cache=kv_cache,
-        activation_memory=activation_memory,
-    )
-
-
-def calculate_training_memory(data: TrainingMemoryRequest) -> TrainingMemoryResponse:
-    model_weights = data.model_size * 1024
-    kv_cache = data.sequence_length * data.hidden_size * data.num_attention_heads * 2 / 1e6
-    activation_memory = data.batch_size * data.sequence_length * data.hidden_size / 1e6
-    optimizer_memory = model_weights * 0.5
-    gradients_memory = model_weights * 0.3
-    total_memory = model_weights + kv_cache + activation_memory + optimizer_memory + gradients_memory
-    return TrainingMemoryResponse(
-        training_memory=total_memory,
-        model_weights=model_weights,
-        kv_cache=kv_cache,
-        activation_memory=activation_memory,
-        optimizer_memory=optimizer_memory,
-        gradients_memory=gradients_memory,
-    )
-
-
-@app.post("/memory/inference", response_model=InferenceMemoryResponse, responses={400: {"model": Error}})
-async def calculate_inference(data: InferenceMemoryRequest):
+@app.post("/upload-model/")
+def upload_model(file: UploadFile):
+    """Endpoint to upload a model configuration JSON file."""
     try:
-        return calculate_inference_memory(data)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        content = json.load(file.file)
+        return {"message": f"Model '{file.filename}' uploaded successfully!", "content": content}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON file.")
 
-
-@app.post("/memory/training", response_model=TrainingMemoryResponse, responses={400: {"model": Error}})
-async def calculate_training(data: TrainingMemoryRequest):
-    try:
-        return calculate_training_memory(data)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+@app.post("/calculate-inference-memory/")
+def calculate_inference(req: InferenceRequest):
+    """Calculate the inference memory requirements based on the provided model parameters."""
+    if req.precision not in DATA_TYPES:
+        raise HTTPException(status_code=400, detail=f"Invalid precision type. Valid options are: {DATA_TYPES}")
     
-if __name__ == "__main__":
+    try:
+        inference_memory = calculate_inference_memory(
+            req.model_size,
+            req.precision,
+            req.batch_size,
+            req.sequence_length,
+            req.hidden_size,
+            req.num_hidden_layers,
+            req.num_attention_heads,
+        )
+        return {
+            "Total Inference Memory": inference_memory["inference_memory"],
+            "Model Weights": inference_memory["model_weights"],
+            "KV Cache": inference_memory["kv_cache"],
+            "Activation Memory": inference_memory["activation_memory"],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    # Use PORT from the environment or default to 8000
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+@app.post("/calculate-training-memory/")
+def calculate_training(req: TrainingRequest):
+    """Calculate the training memory requirements based on the provided model parameters."""
+    if req.precision not in DATA_TYPES:
+        raise HTTPException(status_code=400, detail=f"Invalid precision type. Valid options are: {DATA_TYPES}")
+    if req.optimizer not in OPTIMIZERS:
+        raise HTTPException(status_code=400, detail=f"Invalid optimizer. Valid options are: {list(OPTIMIZERS.keys())}")
+
+    try:
+        training_memory = calculate_training_memory(
+            req.model_size,
+            req.precision,
+            req.batch_size,
+            req.sequence_length,
+            req.hidden_size,
+            req.num_hidden_layers,
+            req.num_attention_heads,
+            req.optimizer,
+            req.trainable_parameters,
+        )
+        return {
+            "Total Training Memory": training_memory["training_memory"],
+            "Model Weights": training_memory["model_weights"],
+            "KV Cache": training_memory["kv_cache"],
+            "Activation Memory": training_memory["activation_memory"],
+            "Optimizer Memory": training_memory["optimizer_memory"],
+            "Gradients Memory": training_memory["gradients_memory"],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ----------------- Running the Server ----------------- #
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
