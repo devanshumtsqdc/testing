@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, UploadFile, Form
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import json
 from typing import Optional
@@ -7,6 +8,15 @@ from utils import calculate_inference_memory, calculate_training_memory
 
 # Initialize FastAPI app
 app = FastAPI(title="LLM Memory Requirements API")
+
+# Enable CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins, or replace with a list of specific origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all HTTP methods
+    allow_headers=["*"],  # Allow all headers
+)
 
 # ----------------- Request Models ----------------- #
 class InferenceRequest(BaseModel):
